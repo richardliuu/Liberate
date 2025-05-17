@@ -4,55 +4,73 @@ import pyautogui
 import time
 import threading
 import win32gui
+import win32con
+import win32api
 
 def get_active_window_handle():
-    """Get the handle of the currently active window"""
     try:
         return win32gui.GetForegroundWindow()
     except:
         return None
 
 def focus_window(handle):
-    """Set focus to a window by its handle"""
     try:
         if handle and win32gui.IsWindow(handle):
+            # Use AttachThreadInput for more reliable focus management
+            foreground_thread = win32api.GetWindowThreadProcessId(win32gui.GetForegroundWindow())[0]
+            my_thread = win32api.GetCurrentThreadId()
+            
+            # Attach threads to ensure focus switch works properly
+            win32api.AttachThreadInput(my_thread, foreground_thread, True)
             win32gui.SetForegroundWindow(handle)
+            win32api.AttachThreadInput(my_thread, foreground_thread, False)
             return True
-    except:
-        pass
+    except Exception as e:
+        print(f"Failed to focus window: {e}")
     return False
 
-class VirtualKeyboard(tk.Toplevel):
+class VirtualKeyboard:
     def __init__(self, parent=None):
-        super().__init__()
-        screen_width = self.winfo_screenwidth()
-        self.window = ctk.CTkToplevel(parent) if parent else ctk.CTk()
+        if parent is None:
+            raise ValueError("VirtualKeyboard requires a parent window")
+        
+        self.target_window = None
+            
+        self.window = ctk.CTkToplevel(parent)
         self.window.title("Virtual Keyboard")
+        
+        # Set window style to be less intrusive
         self.window.attributes('-topmost', True)
+        self.window.overrideredirect(False)
+        
+        # Make it a tool window (doesn't appear in taskbar)
+        try:
+            hwnd = self.window.winfo_id()
+            win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, 
+                                 win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE) | 
+                                 win32con.WS_EX_TOOLWINDOW)
+        except Exception as e:
+            print(f"Error setting window style: {e}")
+        
         self.window.protocol("WM_DELETE_WINDOW", self.hide)
+        self.visible = False
+        self.window.withdraw()
 
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-
-        keyboard_width = 800
-        keyboard_height = 250
-        x = (screen_width - keyboard_width) // 2
-        y = screen_height - keyboard_height - 50  # 50px above taskbar
-
-        self.geometry(f"{keyboard_width}x{keyboard_height}+{x}+{y}")
-        
-        # Making the keyboard semi-transparent
-        self.window.attributes('-alpha', 0.9)
-        
         # Get screen dimensions
         screen_width, screen_height = pyautogui.size()
-
+        
         # Keyboard dimensions
         keyboard_width = 800
         keyboard_height = 300
-
-        # Position the keyboard near the bottom of the screen
-        self.window.geometry(f"{keyboard_width}x{keyboard_height}+{(screen_width-keyboard_width)//2}+{screen_height-keyboard_height-100}")
+        
+        # Position the keyboard just above the taskbar
+        taskbar_height = self.get_taskbar_height()
+        y_position = screen_height - keyboard_height - taskbar_height
+        
+        self.window.geometry(f"{keyboard_width}x{keyboard_height}+{(screen_width-keyboard_width)//2}+{y_position}")
+        
+        # Making the keyboard semi-transparent but still clickable
+        self.window.attributes('-alpha', 0.9)
         
         self.create_keyboard_layout()
         self.window.withdraw()
@@ -60,6 +78,21 @@ class VirtualKeyboard(tk.Toplevel):
         
         # Store the active window when keyboard is shown
         self.active_window_before = None
+    
+    def get_taskbar_height(self):
+        try:
+            taskbar = win32gui.FindWindow("Shell_TrayWnd", None)
+            rect = win32gui.GetWindowRect(taskbar)
+            screen_height = win32gui.GetSystemMetrics(win32con.SM_CYSCREEN)
+            
+            # Taskbar could be on bottom, top, left or right
+            if rect[1] > 0:  
+                return rect[3] - rect[1]
+            else:  # Taskbar at bottom (most common)
+                return screen_height - rect[3]
+        except:
+            # Default fallback if we can't detect taskbar
+            return 40
     
     def create_keyboard_layout(self):
         # Modern dark themed keyboard layout
@@ -157,89 +190,110 @@ class VirtualKeyboard(tk.Toplevel):
             command=self.update_transparency
         )
         transparency_slider.pack(side='left')
+        
+        # Add a reminder label for the target window
+        self.target_label = ctk.CTkLabel(
+            control_frame,
+            text="No target window selected",
+            text_color="gray"
+        )
+        self.target_label.pack(side='left', padx=10)
     
     def update_transparency(self, value):
-        """Update keyboard transparency"""
         self.window.attributes('-alpha', value)
     
     def press_key(self, key):
-        """Handle key press events"""
-        # Visual feedback by changing button appearance
+        # Visual feedback
         original_color = self.buttons[key].cget("fg_color")
-        hover_color = self.buttons[key].cget("hover_color")
         self.buttons[key].configure(fg_color="#aaddff", text_color="#000000")
-        
-        # Remember the keyboard window handle
-        keyboard_handle = None
-        try:
-            keyboard_handle = win32gui.GetForegroundWindow()
-        except:
-            pass
-        
-        # Use a separate thread to restore focus and send keystroke
-        threading.Thread(target=self._execute_keystroke, args=(key, keyboard_handle)).start()
-        
-        # Reset button appearance after a delay
-        self.window.after(100, lambda k=key: self.buttons[k].configure(fg_color=original_color, text_color="white"))
-        
-        # Keeping the window at the front of the screen
-        self.window.after(150, lambda: self.window.attributes('-topmost', True))
-    
-    def _execute_keystroke(self, key, keyboard_handle):
-        """Execute the actual keystroke in a separate thread"""
-        try:
-            # Try to restore focus to the application that was active before keyboard appeared
-            if self.active_window_before:
-                focus_window(self.active_window_before)
-                time.sleep(0.05)  # Short delay to allow focus to change
-            else:
-                # If we don't have a stored handle, try alternative methods
-                self.window.lower()
-                time.sleep(0.05)
             
-            # Send the keystroke
-            if key == 'Backspace':
-                pyautogui.press('backspace')
-            elif key == 'Enter':
-                pyautogui.press('enter')
-            elif key == 'Shift':
-                # Just press shift once (not hold)
-                pyautogui.press('shift')
-            elif key == 'Space':
-                pyautogui.press('space')
-            elif key == 'Ctrl':
-                pyautogui.press('ctrl')
-            elif key == 'Alt':
-                pyautogui.press('alt')
-            elif key == 'Tab':
-                pyautogui.press('tab')
-            elif key == '←':
-                pyautogui.press('left')
-            elif key == '→':
-                pyautogui.press('right')
-            elif key == '↑':
-                pyautogui.press('up')
-            elif key == '↓':
-                pyautogui.press('down')
+        # Make sure we have a valid target window
+        if not self.target_window:
+            self.target_window = self.active_window_before
+        
+        if not self.target_window:
+            print("No target window available")
+            return
+            
+        # Execute keystroke in separate thread
+        threading.Thread(target=self._execute_keystroke, args=(key,)).start()
+            
+        # Reset button appearance
+        self.window.after(100, lambda k=key: self.buttons[k].configure(
+            fg_color=original_color, 
+            text_color="white"
+        ))
+        
+    def _execute_keystroke(self, key):
+        try:
+            # Use reliable method to store keyboard window handle before refocusing
+            keyboard_hwnd = self.window.winfo_id()
+            
+            # Critical: Bring target window to foreground
+            if self.target_window:
+                # Set focus to target window
+                if focus_window(self.target_window):
+                    time.sleep(0.05)  # Short pause to let focus change take effect
+                    
+                    # Map special keys to PyAutoGUI keys
+                    key_map = {
+                        '←': 'left',
+                        '→': 'right',
+                        '↑': 'up',
+                        '↓': 'down',
+                        'Space': 'space'
+                    }
+                    
+                    # Use mapped key if available
+                    send_key = key_map.get(key, key)
+                    
+                    # Special handling for modifier keys
+                    if key == 'Shift':
+                        pyautogui.press('shift')
+                    elif key == 'Ctrl':
+                        pyautogui.press('ctrl')
+                    elif key == 'Alt':
+                        pyautogui.press('alt')
+                    else:
+                        # Send the actual key press
+                        pyautogui.press(send_key)
+                    
+                    # Give time for the key action to register
+                    time.sleep(0.05)
+                else:
+                    print(f"Failed to focus target window for key: {key}")
             else:
-                pyautogui.press(key)
+                print("No target window to send keystrokes to")
                 
         except Exception as e:
             print(f"Error sending keystroke: {e}")
-    
+        
     def show(self):
-        """Display the keyboard"""
         if not self.visible:
             # Store the currently active window before showing keyboard
             self.active_window_before = get_active_window_handle()
+            self.target_window = self.active_window_before
+            
+            try:
+                window_title = win32gui.GetWindowText(self.target_window)
+                self.target_label.configure(text=f"Target: {window_title[:20]}{'...' if len(window_title) > 20 else ''}")
+            except:
+                self.target_label.configure(text="Unknown target window")
             
             # Make keyboard visible
             self.window.deiconify()
             self.visible = True
             
-            # Make sure it's on top
+            # Configure to stay on top but not interfere
             self.window.attributes('-topmost', True)
-            self.window.update()
+            try:
+                hwnd = self.window.winfo_id()
+                # Use SWP_NOACTIVATE to prevent taking focus
+                win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0, 
+                                    win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | 
+                                    win32con.SWP_NOACTIVATE)
+            except Exception as e:
+                print(f"Error configuring window: {e}")
     
     def hide(self):
         if self.visible:

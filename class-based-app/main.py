@@ -15,6 +15,7 @@ import threading
 from core.facialtracker import FacialTracker
 from UI.voice_ui import VoiceAssistantUI
 from collections import deque
+from core.keyboard import VirtualKeyboard
 
 # Load environment variables
 load_dotenv()
@@ -27,6 +28,13 @@ class FacialMouseApp(ctk.CTk):
         
         # Initialize components
         self.tracker = FacialTracker()
+
+        # Keyboard Initlization
+        self.keyboard = VirtualKeyboard(self)
+
+        self.mouth_open_count = 0
+        self.last_mouth_open_time = 0
+        self.keyboard_cooldown = False
         
         # Track app state
         self.tracking_active = False
@@ -370,19 +378,14 @@ class FacialMouseApp(ctk.CTk):
             self.show_error(f"Error initializing webcam: {str(e)}")
     
     def update_camera_preview(self):
-        """Update the camera preview in the UI"""
         if self.cam_active and hasattr(self, 'cap'):
             ret, frame = self.cap.read()
             
             if ret:
-                # Flip the frame horizontally for a mirror effect
-                # This is how the cusor moves in the same direction as you in real life 
                 frame = cv2.flip(frame, 1)
                 
-                # Process the frame if tracking is active
                 if self.tracking_active:
                     if self.calibrating:
-                        # Handle calibration
                         if self.tracker.calibrate(frame):
                             self.calibrating = False
                             self.status_label.configure(text="Calibration complete!")
@@ -391,37 +394,43 @@ class FacialMouseApp(ctk.CTk):
                         
                         if cursor_pos:
                             screen_width, screen_height = pyautogui.size()
-                            
-                            # Add safety margins to avoid triggering PyAutoGUI's fail-safe
                             safe_margin = 15
                             safe_x = max(safe_margin, min(cursor_pos[0], screen_width - safe_margin))
                             safe_y = max(safe_margin, min(cursor_pos[1], screen_height - safe_margin))
-                            
-                            # Move the cursor to the safe position
                             pyautogui.moveTo(safe_x, safe_y)
                             
-                            # Check for click events
+                            # Check for mouth open events
                             if self.tracker.check_mouth_open(frame):
-                                pyautogui.click()
-                                self.status_label.configure(text="Click detected!")
+                                current_time = time.time()
+                                
+                                # Check if we should register a click (single mouth open)
+                                if current_time - self.last_mouth_open_time > 0.5:  # 500ms cooldown
+                                    self.mouth_open_count += 1
+                                    self.last_mouth_open_time = current_time
+                                    
+                                    # Single click
+                                    pyautogui.click()
+                                    self.status_label.configure(text="Click detected!")
+                                
+                                # Check for triple mouth open (keyboard toggle)
+                                if self.mouth_open_count >= 3 and not self.keyboard_cooldown:
+                                    self.keyboard.toggle()
+                                    self.mouth_open_count = 0
+                                    self.keyboard_cooldown = True
+                                    self.after(2000, lambda: setattr(self, 'keyboard_cooldown', False))  # 2s cooldown
+                                    self.status_label.configure(text="Keyboard toggled!")
                             
-                            # Update debug info
-                            if hasattr(self.tracker, 'debug_info'):
-                                debug_text = "\n".join([
-                                    f"{k}: {v}" for k, v in self.tracker.debug_info.items()
-                                ])
-                                self.debug_label.configure(text=debug_text)
+                            # Reset mouth open count if too much time has passed
+                            if time.time() - self.last_mouth_open_time > 1.5:
+                                self.mouth_open_count = 0
                 
-                # Convert the frame to a format suitable for CTk
+                # Convert and display the frame
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 img = Image.fromarray(rgb_frame)
                 photo = ImageTk.PhotoImage(image=img)
-                
-                # Update the camera label
                 self.cam_label.configure(image=photo)
                 self.cam_label.image = photo
         
-        # Schedule next update
         self.after(10, self.update_camera_preview)
     
     def toggle_tracking(self):
