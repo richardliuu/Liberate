@@ -1,0 +1,12 @@
+opencv-python
+numpy
+pyautogui
+mediapipe
+tk
+pywin32
+google-generativeai 
+speechrecognition 
+pyaudio 
+pyttsx3
+python-dotenv
+customtkinter
