@@ -16,6 +16,7 @@ from core.facialtracker import FacialTracker
 from UI.voice_ui import VoiceAssistantUI
 from collections import deque
 from core.keyboard import VirtualKeyboard
+from core.voiceassist import VoiceTypingAssistant
 
 # Load environment variables
 load_dotenv()
@@ -23,8 +24,8 @@ load_dotenv()
 class FacialMouseApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Facial Mouse Controller & Voice Assistant")
-        self.geometry("1000x600")
+        self.title("Visage")
+        self.geometry("1200x800")
         
         # Initialize components
         self.tracker = FacialTracker()
@@ -60,11 +61,10 @@ class FacialMouseApp(ctk.CTk):
         self.setup_voice_tab()
         self.setup_settings_tab()
         
-        # Set default tab
+        # Default tab
         self.tabview.set("Facial Control")
 
     def setup_home_tab(self):
-        """Setup facial mouse control tab"""
         # Main split frame for webcam and controls
         main_frame = ctk.CTkFrame(self.tab_home)
         main_frame.pack(fill="both", expand=True)
@@ -138,7 +138,7 @@ class FacialMouseApp(ctk.CTk):
         
         # Status frame
         status_frame = ctk.CTkFrame(controls_frame)
-        status_frame.pack(fill="x", pady=20)
+        status_frame.pack(fill="x", pady=16)
         
         ctk.CTkLabel(
             status_frame, 
@@ -151,11 +151,11 @@ class FacialMouseApp(ctk.CTk):
             text="Ready to start tracking",
             font=ctk.CTkFont(size=12)
         )
-        self.status_label.pack(pady=5)
+        self.status_label.pack(pady=10)
         
         # Debug info
         debug_frame = ctk.CTkFrame(controls_frame)
-        debug_frame.pack(fill="x", pady=20)
+        debug_frame.pack(fill="x", pady=16)
         
         ctk.CTkLabel(
             debug_frame, 
@@ -201,21 +201,30 @@ class FacialMouseApp(ctk.CTk):
         
         # Initialize the voice assistant UI component
         try:
+        # Existing voice assistant
             self.voice_ui = VoiceAssistantUI(
                 parent_frame=voice_frame,
                 api_key=os.getenv("GEMINI_API_KEY")
             )
+            
+            # Add voice typing assistant
+            self.voice_typing = VoiceTypingAssistant(
+                parent_frame=voice_frame,
+                api_key=os.getenv("GEMINI_API_KEY"),
+                keyboard_ref=self.keyboard  # Pass reference to keyboard
+            )
+            
         except Exception as e:
             error_label = ctk.CTkLabel(
                 voice_frame,
-                text=f"Error initializing voice assistant: {str(e)}",
+                text=f"Error initializing voice features: {str(e)}",
                 text_color="red"
             )
             error_label.pack(pady=20)
             
             help_label = ctk.CTkLabel(
                 voice_frame,
-                text="Make sure you have set the GEMINI_API_KEY in your .env file",
+                text="Ensure GEMINI_API_KEY is in files",
                 text_color="yellow"
             )
             help_label.pack(pady=10)
