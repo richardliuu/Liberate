@@ -24,7 +24,7 @@ class FacialMouseApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Facial Mouse Controller & Voice Assistant")
-        self.geometry("1200x800")
+        self.geometry("1000x600")
         
         # Initialize components
         self.tracker = FacialTracker()
