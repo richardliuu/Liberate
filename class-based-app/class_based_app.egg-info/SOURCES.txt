@@ -1,0 +1,11 @@
+setup.py
+UI/__init__.py
+UI/app_ui.py
+UI/voice_ui.py
+class_based_app.egg-info/PKG-INFO
+class_based_app.egg-info/SOURCES.txt
+class_based_app.egg-info/dependency_links.txt
+class_based_app.egg-info/top_level.txt
+core/__init__.py
+core/facialcontrol.py
+core/voiceassist.py
