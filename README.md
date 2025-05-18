@@ -17,11 +17,12 @@ In terminal: python -m class-based-app.main
 
 # Commands 
 Understanding commands:
-Open = Open mouth and Close
+Open = Open mouth and close
 
-Click = 1 Open
+Click = 1 open
 Toggle Keyboard = 3 Open
 
+When "Start Tracking" is clicked, move your face around and the cursor will follow
 
 # Acknowledging AI Use 
-In the creation of this project, I leveraged ChatGPT to edit code, 
+In the creation of this project, I leveraged ChatGPT to edit code, fill in missing lines of code and help me understand my project more. 
