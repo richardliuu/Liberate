@@ -29,33 +29,45 @@ class FacialTracker:
         self.last_click_time = 0
         self.click_cooldown = 0.5  
         
-        # Triple click for keyboard
+        # Keyboard toggle
         self.mouth_open_count = 0
         self.mouth_open_timer = time.time()
         self.mouth_open_window = 2.0  
         self.keyboard_active = False
         
-        # Calibration variables
+        # Calibration
         self.calibrated = False
         self.neutral_x = 0.5
         self.neutral_y = 0.5
         self.calibration_frames = 30
         self.calibration_count = 0
         
-        # Face landmarks for tracking
+        # Face landmarks
         self.NOSE_TIP = 1
         self.UPPER_LIP = 13
         self.LOWER_LIP = 14
+        self.LEFT_CHEEK = 123
+        self.RIGHT_CHEEK = 352
         self.FOREHEAD = 10
         self.CHIN = 152
+        self.LEFT_EYE_TOP = 159  
+        self.RIGHT_EYE_TOP = 386
+        self.LEFT_EYE_BOTTOM = 145
+        self.RIGHT_EYE_BOTTOM = 374
+        
+        # Cheek inflation settings
+        self.scroll_mode_active = False
+        self.cheek_inflation_threshold = 0.04  # More reliable threshold
+        self.scroll_speed = 30
+        self.scroll_cooldown = 0.15
+        self.neutral_cheek_distance = None
+        self.cheek_inflation_frames = 0
+        self.activation_threshold = 10  # Frames needed to activate
         
         # Debug info
         self.debug_info = {}
     
     def calibrate(self, frame):
-        """
-        Calibrate function to determine the general centerpoint of the webcam for the facial mouse controller
-        """
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.face_mesh.process(rgb_frame)
         
@@ -64,10 +76,9 @@ class FacialTracker:
             nose_x = landmarks[self.NOSE_TIP].x
             nose_y = landmarks[self.NOSE_TIP].y
             
-            # Accumulate calibration frames
             self.calibration_count += 1
             
-            # Draw visual feedback
+            # Visual feedback
             height, width, _ = frame.shape
             cv2.putText(
                 frame,
@@ -78,22 +89,24 @@ class FacialTracker:
                 (0, 255, 0),
                 2
             )
+            cv2.circle(frame, 
+                      (int(nose_x * width), int(nose_y * height)), 
+                      5, (0, 255, 0), -1)
             
-            # Mark nose position
-            nose_x_pixel = int(nose_x * width)
-            nose_y_pixel = int(nose_y * height)
-            cv2.circle(frame, (nose_x_pixel, nose_y_pixel), 5, (0, 255, 0), -1)
-            
-            # When enough frames collected, finalize calibration
             if self.calibration_count >= self.calibration_frames:
                 self.neutral_x = nose_x
                 self.neutral_y = nose_y
+                
+                # Calculate neutral cheek distance (using y-coordinate difference)
+                left_cheek = landmarks[self.LEFT_CHEEK]
+                right_cheek = landmarks[self.RIGHT_CHEEK]
+                self.neutral_cheek_distance = abs(left_cheek.y - right_cheek.y)
+                
                 self.calibrated = True
                 self.x_points.clear()
                 self.y_points.clear()
                 return True
         else:
-            # If face not detected during calibration
             cv2.putText(
                 frame,
                 "No face detected! Please look at the camera",
@@ -103,8 +116,84 @@ class FacialTracker:
                 (0, 0, 255),
                 2
             )
-            
         return False
+    
+    def detect_cheek_inflation(self, landmarks):
+        """Improved cheek inflation detection using multiple landmarks"""
+        if self.neutral_cheek_distance is None:
+            return False
+            
+        # Calculate current cheek expansion
+        current_distance = abs(landmarks[self.LEFT_CHEEK].y - landmarks[self.RIGHT_CHEEK].y)
+        cheek_expansion = current_distance - self.neutral_cheek_distance
+        
+        # Additional check using mouth corners (more reliable)
+        mouth_width = abs(landmarks[61].x - landmarks[291].x)  # Mouth corner indices
+        face_width = abs(landmarks[234].x - landmarks[454].x)  # Ear to ear
+        mouth_ratio = mouth_width / face_width
+        
+        # Combined detection - requires both cheek expansion and mouth compression
+        return (cheek_expansion > self.cheek_inflation_threshold and 
+                mouth_ratio < 0.25)  # Mouth gets narrower when puffing cheeks
+    
+    def detect_gaze_direction(self, landmarks):
+        """More robust gaze detection using eye landmarks"""
+        # Calculate eye openness ratios
+        left_eye_h = abs(landmarks[self.LEFT_EYE_TOP].y - landmarks[self.LEFT_EYE_BOTTOM].y)
+        right_eye_h = abs(landmarks[self.RIGHT_EYE_TOP].y - landmarks[self.RIGHT_EYE_BOTTOM].y)
+        left_eye_w = abs(landmarks[33].x - landmarks[133].x)  # Left eye corners
+        right_eye_w = abs(landmarks[362].x - landmarks[263].x) # Right eye corners
+        
+        left_ratio = left_eye_h / left_eye_w
+        right_ratio = right_eye_h / right_eye_w
+        avg_ratio = (left_ratio + right_ratio) / 2
+        
+        if avg_ratio < 0.2:   # Eyes more closed = looking down
+            return "down"
+        elif avg_ratio > 0.3: # Eyes more open = looking up
+            return "up"
+        return "neutral"
+    
+    def handle_scrolling(self, frame, landmarks):
+        """Improved scrolling that doesn't disable mouse control"""
+        current_time = time.time()
+        cheek_inflated = self.detect_cheek_inflation(landmarks)
+        
+        if cheek_inflated:
+            self.cheek_inflation_frames += 1
+            
+            # Only activate after consistent detection
+            if self.cheek_inflation_frames >= self.activation_threshold:
+                if not self.scroll_mode_active:
+                    self.scroll_mode_active = True
+                    cv2.putText(frame, "SCROLL MODE ACTIVATED", (20, 140),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+                
+                # Perform scrolling based on gaze
+                if current_time - self.last_click_time > self.scroll_cooldown:
+                    gaze_dir = self.detect_gaze_direction(landmarks)
+                    self.last_click_time = current_time
+                    
+                    if gaze_dir == "up":
+                        pyautogui.scroll(self.scroll_speed)
+                        return "up"
+                    elif gaze_dir == "down":
+                        pyautogui.scroll(-self.scroll_speed)
+                        return "down"
+        else:
+            self.cheek_inflation_frames = 0
+            if self.scroll_mode_active:
+                cv2.putText(frame, "SCROLL MODE OFF", (20, 140),
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+            self.scroll_mode_active = False
+        
+        return None
+    
+    def detect_mouth_open(self, landmarks):
+        """Vertical mouth opening detection (for clicks)"""
+        mouth_dist = abs(landmarks[self.UPPER_LIP].y - landmarks[self.LOWER_LIP].y)
+        face_height = abs(landmarks[self.FOREHEAD].y - landmarks[self.CHIN].y)
+        return (mouth_dist / face_height) > self.click_threshold
     
     def track_face(self, frame):
         if not self.calibrated:
@@ -112,7 +201,6 @@ class FacialTracker:
             
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.face_mesh.process(rgb_frame)
-        
         height, width, _ = frame.shape
         
         if not results.multi_face_landmarks:
@@ -127,12 +215,16 @@ class FacialTracker:
             )
             return None
             
-        # Get landmarks
         landmarks = results.multi_face_landmarks[0].landmark
+        
+        # Handle scrolling (runs alongside cursor tracking)
+        scroll_action = self.handle_scrolling(frame, landmarks)
+        
+        # Always track cursor (scrolling doesn't disable it)
         nose_x = landmarks[self.NOSE_TIP].x
         nose_y = landmarks[self.NOSE_TIP].y
         
-        # Calculate cursor position based on head movement
+        # Calculate cursor position
         offset_x = (nose_x - self.neutral_x) * self.sensitivity
         offset_y = (nose_y - self.neutral_y) * self.sensitivity
         
@@ -148,85 +240,80 @@ class FacialTracker:
             smoothed_x = sum(self.x_points) / len(self.x_points)
             smoothed_y = sum(self.y_points) / len(self.y_points)
             
-            # Draw tracking info on frame
-            nose_x_pixel = int(nose_x * width)
-            nose_y_pixel = int(nose_y * height)
+            # Draw tracking visuals
+            nose_pixel = (int(nose_x * width), int(nose_y * height))
+            neutral_pixel = (int(self.neutral_x * width), int(self.neutral_y * height))
             
-            # Draw face tracking indicators
-            cv2.circle(frame, (nose_x_pixel, nose_y_pixel), 5, (0, 255, 0), -1)
+            cv2.circle(frame, nose_pixel, 5, (0, 255, 0), -1)
+            cv2.circle(frame, neutral_pixel, 3, (0, 0, 255), -1)
             
-            neutral_x_pixel = int(self.neutral_x * width)
-            neutral_y_pixel = int(self.neutral_y * height)
-            cv2.circle(frame, (neutral_x_pixel, neutral_y_pixel), 3, (0, 0, 255), -1)
+            # Display status information
+            status_y = 80
+            mouth_status = "OPEN" if self.detect_mouth_open(landmarks) else "closed"
+            mouth_color = (0, 255, 0) if mouth_status == "OPEN" else (255, 0, 0)
+            cv2.putText(
+                frame,
+                f"Mouth: {mouth_status}",
+                (20, status_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                mouth_color,
+                2 if mouth_status == "OPEN" else 1
+            )
+            status_y += 30
             
-            # Draw mouth state
-            mouth_open = self.detect_mouth_open(landmarks)
-            if mouth_open:
-                cv2.putText(
-                    frame,
-                    "Mouth: OPEN",
-                    (20, 80),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2
-                )
-            else:
-                cv2.putText(
-                    frame,
-                    "Mouth: closed",
-                    (20, 80),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (255, 0, 0),
-                    1
-                )
-                
-            # Draw keyboard status
             keyboard_status = "ACTIVE" if self.keyboard_active else "inactive"
             keyboard_color = (0, 255, 0) if self.keyboard_active else (255, 0, 0)
-            thickness = 2 if self.keyboard_active else 1
-            
             cv2.putText(
                 frame,
                 f"Keyboard: {keyboard_status}",
-                (20, 110),
+                (20, status_y),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
                 keyboard_color,
-                thickness
+                2 if self.keyboard_active else 1
             )
+            status_y += 30
             
-            # Update debug info
-            self.debug_info = {
-                "nose_position": (nose_x, nose_y),
-                "neutral_position": (self.neutral_x, self.neutral_y),
-                "offset": (offset_x, offset_y),
-                "cursor": (int(smoothed_x), int(smoothed_y)),
-                "mouth_open": mouth_open,
-                "mouth_count": self.mouth_open_count,
-                "keyboard_active": self.keyboard_active
-            }
+            # Display scroll status if active
+            if self.scroll_mode_active:
+                scroll_color = (0, 255, 255)
+                cv2.putText(
+                    frame,
+                    "SCROLL MODE: ON",
+                    (20, status_y),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    scroll_color,
+                    2
+                )
+                status_y += 30
+            
+            # Visual feedback for scrolling action
+            if scroll_action == "up":
+                cv2.putText(
+                    frame,
+                    "SCROLLING UP",
+                    (width//2 - 100, height - 50),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 255),
+                    2
+                )
+            elif scroll_action == "down":
+                cv2.putText(
+                    frame,
+                    "SCROLLING DOWN",
+                    (width//2 - 100, height - 50),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 255),
+                    2
+                )
             
             return (int(smoothed_x), int(smoothed_y))
-            
+        
         return None
-    
-    def detect_mouth_open(self, landmarks):
-        """Detect if mouth is open based on lip distance"""
-        upper_lip = landmarks[self.UPPER_LIP]
-        lower_lip = landmarks[self.LOWER_LIP]
-        
-        # Calculate vertical distance between lips
-        mouth_distance = abs(upper_lip.y - lower_lip.y)
-        
-        # Calculate face height for normalization
-        face_height = abs(landmarks[self.FOREHEAD].y - landmarks[self.CHIN].y)
-        
-        # Normalized mouth openness
-        mouth_ratio = mouth_distance / face_height
-        
-        return mouth_ratio > self.click_threshold
     
     def check_mouth_open(self, frame):
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -236,38 +323,23 @@ class FacialTracker:
             return False
             
         landmarks = results.multi_face_landmarks[0].landmark
-        
-        # Check if mouth is open
-        mouth_open = self.detect_mouth_open(landmarks)
-        
-        # Handle mouth open/close state changes for click detection
         current_time = time.time()
         
-        if mouth_open:
-            # Registers a new mouth open only after mouth was closed
+        if self.detect_mouth_open(landmarks):
             if current_time - self.last_click_time > self.click_cooldown:
                 self.last_click_time = current_time
-                
-                # Track multiple mouth opens for keyboard toggle
                 self.mouth_open_count += 1
+                
                 if current_time - self.mouth_open_timer > self.mouth_open_window:
-                    # Reset counter if too much time passed
-                    # This vaule could be changed to 
                     self.mouth_open_count = 1
                     self.mouth_open_timer = current_time
-                """
-                Keyboard component has yet to be implemented.
-                Look back to the big file draft that contains it 
-                """
-                # Check for triple click to toggle keyboard
+                
                 if self.mouth_open_count >= 3:
                     self.keyboard_active = not self.keyboard_active
                     self.mouth_open_count = 0
-                    print(f"Keyboard {'activated' if self.keyboard_active else 'deactivated'}")
                     return False 
                 
                 return True
-                
         return False
     
     def release(self):

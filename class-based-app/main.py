@@ -199,32 +199,25 @@ class FacialMouseApp(ctk.CTk):
         voice_frame = ctk.CTkFrame(self.tab_voice)
         voice_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Initialize the voice assistant UI component
+        # Initialize the voice typing assistant with Google Docs functionality
         try:
-        # Existing voice assistant
-            self.voice_ui = VoiceAssistantUI(
-                parent_frame=voice_frame,
-                api_key=os.getenv("GEMINI_API_KEY")
-            )
-            
-            # Add voice typing assistant
             self.voice_typing = VoiceTypingAssistant(
                 parent_frame=voice_frame,
                 api_key=os.getenv("GEMINI_API_KEY"),
                 keyboard_ref=self.keyboard  # Pass reference to keyboard
             )
-            
         except Exception as e:
+            # Error handling if initialization fails
             error_label = ctk.CTkLabel(
                 voice_frame,
-                text=f"Error initializing voice features: {str(e)}",
+                text=f"Error initializing voice assistant: {str(e)}",
                 text_color="red"
             )
             error_label.pack(pady=20)
             
             help_label = ctk.CTkLabel(
                 voice_frame,
-                text="Ensure GEMINI_API_KEY is in files",
+                text="Please check your GEMINI_API_KEY in .env file",
                 text_color="yellow"
             )
             help_label.pack(pady=10)
