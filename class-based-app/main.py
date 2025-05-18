@@ -24,7 +24,7 @@ load_dotenv()
 class FacialMouseApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Visage")
+        self.title("Liberate")
         self.geometry("1200x800")
         
         # Initialize components
