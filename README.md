@@ -1,3 +1,7 @@
+# Functionality of the App
+
+- Liberate aims to provide a hands-free computing experience for disabled individuals. Improving accessibility in fields like STEM is a major breakthrough as more minds can collaborate to work. This also allows individuals themselves to engage in more activities and embark on projects like building apps.
+
 # Installing the required packages
 
 - Create a copy of the repository
@@ -26,3 +30,4 @@ When "Start Tracking" is clicked, move your face around and the cursor will foll
 
 # Acknowledging AI Use 
 In the creation of this project, I leveraged ChatGPT to edit code, fill in missing lines of code and help me understand my project more. 
+
