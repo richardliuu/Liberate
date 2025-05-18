@@ -90,7 +90,8 @@ class VoiceTypingAssistant:
         self.parent = parent_frame
         self.keyboard = keyboard_ref
         self.api_key = api_key
-        self.mode = "docs"  # Default mode ("docs" or "python")
+        self.mode = "docs"  
+        # Default Google Docs
         
         # Initialize speech recognition
         self.recognizer = sr.Recognizer()
@@ -105,7 +106,6 @@ class VoiceTypingAssistant:
         self.text_queue = Queue()
         self.is_listening = False
         
-        # UI Setup
         self.setup_ui()
         
         # Start processing thread
@@ -118,7 +118,6 @@ class VoiceTypingAssistant:
         logger.info("Voice typing assistant initialized")
 
     def setup_ui(self):
-        """Create the voice typing interface with mode switching"""
         self.frame = ctk.CTkFrame(self.parent)
         self.frame.pack(fill="both", expand=True, padx=10, pady=10)
         
@@ -135,7 +134,7 @@ class VoiceTypingAssistant:
             self.frame,
             text="Switch to Python Mode",
             command=self.toggle_mode,
-            fg_color="#4CAF50",  # Green for Python mode
+            fg_color="#4CAF50", 
             hover_color="#2E7D32",
             width=200
         )
@@ -212,7 +211,7 @@ class VoiceTypingAssistant:
         self.update_mode_ui()
 
     def toggle_mode(self):
-        """Switch between docs and python modes"""
+        """Switch between Docs and Python"""
         self.mode = "python" if self.mode == "docs" else "docs"
         self.update_mode_ui()
         self.log_to_ui(f"Switched to {self.mode} mode")
@@ -243,7 +242,6 @@ class VoiceTypingAssistant:
         self.debug_console.see("end")
 
     def start_listening(self):
-        """Start recording speech"""
         try:
             if not self.is_listening:
                 self.is_listening = True
@@ -289,7 +287,6 @@ class VoiceTypingAssistant:
             self.log_to_ui(f"Processing error: {str(e)}")
 
     def capture_audio(self):
-        """Capture audio from microphone"""
         try:
             with self.microphone as source:
                 self.log_to_ui("Adjusting for ambient noise...")
@@ -351,7 +348,6 @@ class VoiceTypingAssistant:
             return f"Error: {str(e)}"
 
     def generate_python_code(self, text):
-        """Use Gemini to generate Python code"""
         try:
             self.log_to_ui("Sending text to Gemini for code generation...")
             prompt = f"""Convert this natural language description into clean, functional Python code:
@@ -368,11 +364,93 @@ class VoiceTypingAssistant:
             Python Code:"""
             
             response = self.model.generate_content(prompt)
+            generated_code = response.text
             self.log_to_ui("Received code from Gemini")
-            return response.text
+            
+            # Display the code in the UI
+            self.text_display.insert("end", f"\nGenerated Code:\n{generated_code}\n")
+            self.status_label.configure(text="Python code generated!")
+            
+            # Type into VS Code
+            self.type_into_vscode(generated_code)
+            
+            return generated_code
         except Exception as e:
             self.log_to_ui(f"Code generation error: {str(e)}")
             return f"Error generating code: {str(e)}"
+
+    def type_into_vscode(self, code):
+        """Type the generated code into VS Code"""
+        try:
+            self.log_to_ui("Preparing to type into VS Code...")
+            
+            # Activate VS Code window
+            self.activate_vscode()
+            
+            # Type the code with proper delays
+            self.log_to_ui("Typing code into VS Code...")
+            pyautogui.click()  # Ensure focus in editor
+            time.sleep(0.5)
+            
+            # Split code into lines and type with proper indentation
+            lines = code.split('\n')
+            for line in lines:
+                pyautogui.write(line, interval=0.05)
+                pyautogui.press('enter')
+                time.sleep(0.1)
+            
+            self.log_to_ui("Successfully typed code into VS Code")
+            return True
+        except Exception as e:
+            self.log_to_ui(f"Error typing into VS Code: {str(e)}")
+            return False
+
+    def activate_vscode(self):
+        try:
+            # Try to find VS Code window
+            self.log_to_ui("Looking for VS Code window...")
+            
+            # Windows implementation
+            if os.name == 'nt':
+                import win32gui
+                def window_enum_handler(hwnd, result_list):
+                    if 'visual studio code' in win32gui.GetWindowText(hwnd).lower():
+                        result_list.append(hwnd)
+                windows = []
+                win32gui.EnumWindows(window_enum_handler, windows)
+                if windows:
+                    win32gui.ShowWindow(windows[0], 5)  # SW_SHOW
+                    win32gui.SetForegroundWindow(windows[0])
+                    self.log_to_ui("VS Code window activated")
+                    return True
+            
+            # Fallback method using window title search
+            self.log_to_ui("Using fallback window activation method")
+            try:
+                # Get all windows with "Visual Studio Code" in title
+                for window in pyautogui.getAllWindows():
+                    if "visual studio code" in window.title.lower():
+                        window.activate()
+                        time.sleep(1)
+                        self.log_to_ui(f"Activated window: {window.title}")
+                        return True
+            except Exception as e:
+                self.log_to_ui(f"Window activation error: {str(e)}")
+            
+            # If all else fails, just start VS Code
+            self.log_to_ui("Couldn't find window, launching VS Code")
+            try:
+                if os.name == 'nt':
+                    os.startfile("code")
+                else:
+                    subprocess.run(["code"])
+            except:
+                self.log_to_ui("Couldn't launch VS Code automatically")
+            
+            return False
+        except Exception as e:
+            self.log_to_ui(f"VS Code activation error: {str(e)}")
+            return False
 
     def open_and_type_in_docs(self, text):
         """Open Google Docs and type the text (Docs mode only)"""
@@ -391,11 +469,10 @@ class VoiceTypingAssistant:
                 # Method 2: Try platform-specific
                 if os.name == 'nt':  # Windows
                     os.startfile(docs_url)
-                elif os.name == 'posix':  # Linux/Mac
+                elif os.name == 'posix':  # Not really needed 
                     subprocess.run(['xdg-open', docs_url])
                 self.log_to_ui("Opened via system command")
 
-            # Wait for browser to open
             time.sleep(3)
             
             # Additional wait if needed (check for browser focus)
@@ -408,7 +485,7 @@ class VoiceTypingAssistant:
             
             # Type the text with failsafe
             self.log_to_ui("Starting to type...")
-            pyautogui.click()  # Ensure focus
+            pyautogui.click() 
             time.sleep(0.5)
             
             # Type in chunks to avoid issues
@@ -423,6 +500,5 @@ class VoiceTypingAssistant:
             self.log_to_ui(f"Google Docs error: {str(e)}")
 
     def clear_text(self):
-        """Clear the text display"""
         self.text_display.delete("1.0", "end")
         self.log_to_ui("Text display cleared")
